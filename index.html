@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Black & White Paint</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #171717; background: #f4f4f4; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 24px; }
+    main { max-width: 1100px; margin: auto; }
+    h1 { margin: 0 0 16px; font-size: 1.7rem; }
+    .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+    button { border: 1px solid #777; border-radius: 8px; background: white; color: #171717; padding: 9px 14px; font: inherit; cursor: pointer; }
+    button:hover { background: #ececec; }
+    button[aria-pressed="true"] { outline: 3px solid #777; outline-offset: 2px; }
+    .black { background: #171717; color: white; }
+    .black:hover { background: #333; }
+    label { display: inline-flex; align-items: center; gap: 8px; }
+    input[type="range"] { width: 125px; accent-color: #171717; }
+    .spacer { flex: 1; }
+    .canvas-wrap { position: relative; overflow: auto; border: 1px solid #bbb; background: white; box-shadow: 0 4px 18px #0001; }
+    canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: crosshair; }
+    .grid { position: absolute; inset: 0; pointer-events: none; display: none; }
+    .grid.visible { display: block; }
+    .hint { color: #555; font-size: .9rem; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Black & White Paint</h1>
+  <div class="toolbar" role="toolbar" aria-label="Drawing tools">
+    <button id="black" class="black" type="button" aria-pressed="true">Black pen</button>
+    <button id="white" type="button" aria-pressed="false">White pen / eraser</button>
+    <label for="size">Brush size <input id="size" type="range" min="1" max="60" value="6"><output id="sizeValue" for="size">6 px</output></label>
+    <span class="spacer"></span>
+    <button id="noGridToggle" type="button" aria-pressed="true">No grid</button>
+    <button id="gridToggle" type="button" aria-pressed="false">3 × 3 grid</button>
+    <button id="grid12Toggle" type="button" aria-pressed="false">12 × 12 grid with labels</button>
+    <button id="undo" type="button" disabled>Undo</button>
+    <button id="clear" type="button">Clear</button>
+    <button id="save" type="button">Save PNG</button>
+  </div>
+  <div class="canvas-wrap"><canvas id="canvas" width="1200" height="800" aria-label="Drawing canvas"></canvas><canvas id="grid" class="grid" width="1200" height="800" aria-hidden="true"></canvas></div>
+  <p class="hint">Draw with a mouse, finger, or stylus. The PNG is 1200 × 800 pixels with a white background.</p>
+</main>
+<script>
+(() => {
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const black = document.getElementById('black');
+  const white = document.getElementById('white');
+  const size = document.getElementById('size');
+  const sizeValue = document.getElementById('sizeValue');
+  const undo = document.getElementById('undo');
+  const noGridToggle = document.getElementById('noGridToggle');
+  const gridToggle = document.getElementById('gridToggle');
+  const grid = document.getElementById('grid');
+  const grid12Toggle = document.getElementById('grid12Toggle');
+  const gridCtx = grid.getContext('2d');
+  let gridMode = 0;
+  let color = '#000000';
+  let drawing = false;
+  let previous = null;
+  const history = [];
+
+  function fillWhite() {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  fillWhite();
+
+  function point(event) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: (event.clientX - rect.left) * canvas.width / rect.width,
+             y: (event.clientY - rect.top) * canvas.height / rect.height };
+  }
+  function saveHistory() {
+    if (history.length === 20) history.shift();
+    history.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+    undo.disabled = false;
+  }
+  function drawTo(p) {
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = Number(size.value);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(previous.x, previous.y);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    previous = p;
+  }
+  canvas.addEventListener('pointerdown', event => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    saveHistory();
+    drawing = true;
+    canvas.setPointerCapture(event.pointerId);
+    previous = point(event);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(previous.x, previous.y, Number(size.value) / 2, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  canvas.addEventListener('pointermove', event => {
+    if (!drawing) return;
+    event.preventDefault();
+    drawTo(point(event));
+  });
+  function endStroke() { drawing = false; previous = null; }
+  canvas.addEventListener('pointerup', endStroke);
+  canvas.addEventListener('pointercancel', endStroke);
+  canvas.addEventListener('lostpointercapture', endStroke);
+
+  function select(selected) {
+    color = selected === black ? '#000000' : '#ffffff';
+    black.setAttribute('aria-pressed', String(selected === black));
+    white.setAttribute('aria-pressed', String(selected === white));
+  }
+  black.addEventListener('click', () => select(black));
+  white.addEventListener('click', () => select(white));
+  size.addEventListener('input', () => { sizeValue.value = `${size.value} px`; });
+  function drawGrid() {
+    gridCtx.clearRect(0, 0, grid.width, grid.height);
+    grid.classList.toggle('visible', gridMode !== 0);
+    noGridToggle.setAttribute('aria-pressed', String(gridMode === 0));
+    gridToggle.setAttribute('aria-pressed', String(gridMode === 3));
+    grid12Toggle.setAttribute('aria-pressed', String(gridMode === 12));
+    if (!gridMode) return;
+    const cells = gridMode;
+    gridCtx.strokeStyle = '#888888';
+    gridCtx.lineWidth = 1;
+    gridCtx.beginPath();
+    for (let i = 1; i < cells; i++) {
+      const x = Math.round(grid.width * i / cells) + 0.5;
+      const y = Math.round(grid.height * i / cells) + 0.5;
+      gridCtx.moveTo(x, 0); gridCtx.lineTo(x, grid.height);
+      gridCtx.moveTo(0, y); gridCtx.lineTo(grid.width, y);
+    }
+    gridCtx.stroke();
+    if (cells !== 12) return;
+    gridCtx.font = 'bold 17px system-ui, sans-serif';
+    gridCtx.textBaseline = 'middle';
+    // White label backgrounds keep the numbers legible over drawing strokes.
+    function label(value, x, y, align) {
+      const text = String(value);
+      gridCtx.textAlign = align;
+      const width = gridCtx.measureText(text).width;
+      const left = align === 'right' ? x - width : align === 'center' ? x - width / 2 : x;
+      gridCtx.fillStyle = 'rgba(255,255,255,0.9)';
+      gridCtx.fillRect(left - 3, y - 11, width + 6, 22);
+      gridCtx.fillStyle = '#222222';
+      gridCtx.fillText(text, x, y);
+    }
+    label(0, 6, grid.height - 15, 'left');
+    for (let i = 1; i <= 12; i++) {
+      const x = grid.width * i / 12;
+      const y = grid.height - grid.height * i / 12;
+      label(i, Math.min(x, grid.width - 7), grid.height - 15, i === 12 ? 'right' : 'center');
+      label(i, 7, Math.max(y, 13), 'left');
+    }
+  }
+  noGridToggle.addEventListener('click', () => { gridMode = 0; drawGrid(); });
+  gridToggle.addEventListener('click', () => { gridMode = 3; drawGrid(); });
+  grid12Toggle.addEventListener('click', () => { gridMode = 12; drawGrid(); });
+  undo.addEventListener('click', () => {
+    const snapshot = history.pop();
+    if (snapshot) ctx.putImageData(snapshot, 0, 0);
+    undo.disabled = history.length === 0;
+  });
+  document.getElementById('clear').addEventListener('click', () => {
+    saveHistory();
+    fillWhite();
+  });
+  document.getElementById('save').addEventListener('click', () => {
+    const link = document.createElement('a');
+    link.download = 'my-drawing.png';
+    if (gridMode) {
+      const output = document.createElement('canvas');
+      output.width = canvas.width;
+      output.height = canvas.height;
+      const out = output.getContext('2d');
+      out.drawImage(canvas, 0, 0);
+      out.drawImage(grid, 0, 0);
+      link.href = output.toDataURL('image/png');
+    } else {
+      link.href = canvas.toDataURL('image/png');
+    }
+    link.click();
+  });
+})();
+</script>
+</body>
+</html>
